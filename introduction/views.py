@@ -8,6 +8,7 @@ import pickle
 import random
 import re
 import string
+from django.core.signing import Signer
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -33,16 +34,17 @@ from django.template.loader import render_to_string
 from django.views.decorators.csrf import csrf_exempt
 from PIL import Image, ImageMath
 from requests.structures import CaseInsensitiveDict
+from django.utils.html import escape
 
 from .forms import NewUserForm
 from .models import (FAANG, AF_admin, AF_session_id, Blogs, CF_user, authLogin,
                      comments, info, login, otp, sql_lab_table, tickits)
 from .utility import customHash, filter_blog
-
 import logging
+
 logger = logging.getLogger(__name__)
 
-
+ph = PasswordHasher()
 #*****************************************Lab Requirements****************************************************#
 
 #*****************************************Login and Registration****************************************************#
@@ -52,12 +54,16 @@ def register(request):
 		form = NewUserForm(request.POST)
 		if form.is_valid():
 			user = form.save()
+			ph = PasswordHasher()
+			hashed_pw = ph.hash(form.cleaned_data["password"])
+			CF_user.objects.create(username=user.username, password=hashed_pw)
 			login(request, user)
-			messages.success(request, "Registration successful." )
+			messages.success(request, "Registration successful.")
 			return redirect('/')
 		messages.error(request, "Unsuccessful registration. Invalid information.")
 	form = NewUserForm()
-	return render (request=request, template_name="registration/register.html", context={"register_form":form})
+	return render(request=request, template_name="registration/register.html", context={"register_form":form})
+
 
 # def register(request):
 #     if request.method=="POST":
@@ -408,38 +414,39 @@ def cmd(request):
         return render(request,'Lab/CMD/cmd.html')
     else:
         return redirect('login')
+
 @csrf_exempt
 def cmd_lab(request):
     if request.user.is_authenticated:
-        if(request.method=="POST"):
-            domain=request.POST.get('domain')
-            domain=domain.replace("https://www.",'')
-            os=request.POST.get('os')
-            print(os)
-            if(os=='win'):
-                command="nslookup {}".format(domain)
+        if request.method == "POST":
+            domain = request.POST.get('domain', '')
+            os_type = request.POST.get('os')
+
+            domain = domain.replace("https://www.", '').strip()
+
+            if not re.match(r'^[a-zA-Z0-9.-]+$', domain):
+                logger.warning(f"[CMD Injection Attempt] User: {request.user} | Input: {domain}")
+                return render(request, 'Lab/CMD/cmd_lab.html', {"output": "Invalid domain name"})
+
+            if os_type == 'win':
+                command = ["nslookup", domain]
             else:
-                command = "dig {}".format(domain)
-            
+                command = ["dig", domain]
+
             try:
-                # output=subprocess.check_output(command,shell=True,encoding="UTF-8")
                 process = subprocess.Popen(
                     command,
-                    shell=True,
-                    stdout=subprocess.PIPE, 
-                    stderr=subprocess.PIPE)
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
                 stdout, stderr = process.communicate()
-                data = stdout.decode('utf-8')
-                stderr = stderr.decode('utf-8')
-                # res = json.loads(data)
-                # print("Stdout\n" + data)
-                output = data + stderr
-                print(data + stderr)
-            except:
-                output = "Something went wrong"
-                return render(request,'Lab/CMD/cmd_lab.html',{"output":output})
-            print(output)
-            return render(request,'Lab/CMD/cmd_lab.html',{"output":output})
+                output = stdout.decode('utf-8') + stderr.decode('utf-8')
+            except Exception as e:
+                logger.error(f"[CMD Execution Error] User: {request.user} | Error: {str(e)}")
+                output = "Something went wrong."
+
+            logger.info(f"[CMD Executed] User: {request.user} | Command: {' '.join(command)}")
+            return render(request, 'Lab/CMD/cmd_lab.html', {"output": output})
         else:
             return render(request, 'Lab/CMD/cmd_lab.html')
     else:
@@ -448,17 +455,21 @@ def cmd_lab(request):
 @csrf_exempt
 def cmd_lab2(request):
     if request.user.is_authenticated:
-        if (request.method=="POST"):
-            val=request.POST.get('val')
-            
-            print(val)
+        if request.method == "POST":
+            val = request.POST.get('val')
+            logger.info(f"User input: {val}")
+
             try:
-                output = eval(val)
-            except:
-                output = "Something went wrong"
-                return render(request,'Lab/CMD/cmd_lab2.html',{"output":output})
-            print("Output = ", output)
-            return render(request,'Lab/CMD/cmd_lab2.html',{"output":output})
+                if all(c in "0123456789+-*/(). " for c in val):
+                    output = eval(val)
+                else:
+                    raise ValueError("Invalid characters")
+            except Exception as e:
+                logger.warning(f"Unsafe or invalid input: {val} | Error: {e}")
+                output = "Invalid expression"
+
+            logger.info(f"Eval result: {output}")
+            return render(request, 'Lab/CMD/cmd_lab2.html', {"output": output})
         else:
             return render(request, 'Lab/CMD/cmd_lab2.html')
     else:
@@ -529,11 +540,9 @@ def sec_mis_lab(request):
         return redirect('login')
 
 def secret(request):
-    XHost = request.headers.get('X-Host', 'None')
-    if(XHost == 'admin.localhost:8000'):
-        return render(request,"Lab/sec_mis/sec_mis_lab.html", {"secret": "S3CR37K3Y"})
-    else:
-        return render(request,"Lab/sec_mis/sec_mis_lab.html", {"no_secret": "Only admin.localhost:8000 can access, Your X-Host is " + XHost})
+    if request.user.is_authenticated and request.user.is_superuser:
+        return render(request, "Lab/sec_mis/sec_mis_lab.html", {"secret": "S3CR37K3Y"})
+    return render(request, "Lab/sec_mis/sec_mis_lab.html", {"no_secret": "Access Denied"})
 
 
 #**********************************************************A9*************************************************#
@@ -681,49 +690,72 @@ def insec_desgine(request):
     else:
         return redirect('login')
 
+import logging
+
+# Initialize logger
+logger = logging.getLogger(__name__)
+
 def insec_desgine_lab(request):
     if request.user.is_authenticated:
-        if request.method=="GET":
-            tkts = tickits.objects.filter(user = request.user)
-            Tickets = []
-            for tkt in tkts:
-                Tickets.append(tkt.tickit)
-            return render(request,"Lab/A11/a11_lab.html",{"tickets":Tickets})
-        elif request.method=="POST":
-            tkts = tickits.objects.filter(user = request.user)
-            Tickets = []
-            for tkt in tkts:
-                Tickets.append(tkt.tickit)
-            try :
-                count = request.POST.get("count")
-                if (int(count)+len(tkts)) <=5:
+        if request.method == "GET":
+            tkts = tickits.objects.filter(user=request.user)
+            Tickets = [tkt.tickit for tkt in tkts]
+            return render(request, "Lab/A11/a11_lab.html", {"tickets": Tickets})
+
+        elif request.method == "POST":
+            tkts = tickits.objects.filter(user=request.user)
+            Tickets = [tkt.tickit for tkt in tkts]
+
+            count = request.POST.get("count")
+
+            try:
+                if int(count) <= 0:
+                    logger.warning(f"Invalid count value: {count} entered by user {request.user.username}")
+                    return render(request, "Lab/A11/a11_lab.html", {"error": "Invalid ticket count", "tickets": Tickets})
+
+                if len(tkts) + int(count) <= 5:
                     for i in range(int(count)):
                         ticket_code = gentckt()
                         Tickets.append(ticket_code)
-                        T = tickits(user = request.user, tickit = ticket_code)
+                        T = tickits(user=request.user, tickit=ticket_code)
                         T.save()
-                    
-                    return render(request,"Lab/A11/a11_lab.html",{"tickets":Tickets})
+
+                    return render(request, "Lab/A11/a11_lab.html", {"tickets": Tickets})
                 else:
-                    return render(request,"Lab/A11/a11_lab.html",{"error":"You can have atmost 5 tickits","tickets":Tickets})
-            except:
-                try :
+                    logger.warning(f"User {request.user.username} attempted to exceed 5 tickets (current tickets: {len(tkts)}, requested: {count})")
+                    return render(request, "Lab/A11/a11_lab.html", {"error": "You can have at most 5 tickets", "tickets": Tickets})
+
+            except Exception as e:
+                logger.error(f"Error processing POST request for user {request.user.username}: {str(e)}")
+                return render(request, "Lab/A11/a11_lab.html", {"error": "Something went wrong", "tickets": Tickets})
+
+            # Handle after all tickets are sold logic
+            try:
+                all_tickets = tickits.objects.all()
+                sold_tickets = len(all_tickets)
+
+                if sold_tickets >= 60:  # All tickets are sold out
+                    logger.info(f"All tickets have been sold. Total sold tickets: {sold_tickets}")
                     tickit = request.POST.get("ticket")
-                    all_tickets = tickits.objects.all()
-                    sold_tickets = len(all_tickets)
-                    if sold_tickets <60:
-                        return render(request,"Lab/A11/a11_lab.html", {"error": "Invalid tickit","tickets":Tickets,"error":f"Wait until all tickets are sold ({60-sold_tickets} tickets left)"})
+                    if tickit in Tickets:
+                        return render(request, "Lab/A11/a11_lab.html", {
+                            "tickets": Tickets,
+                            "error": "Congratulations, you figured out the flaw in the design. A better authentication system should be used."
+                        })
                     else:
-                        if tickit in Tickets:
-                            return render(request,"Lab/A11/a11_lab.html", {"error": "Congratulation,You figured out the flaw in Design.<br> A better authentication should be used in case for checking the uniqueness of a user.","tickets":Tickets})
-                        else:
-                            return render(request,"Lab/A11/a11_lab.html",{"tickets":Tickets,"error": "Invalid ticket"},)
-                except:
-                    return render(request,"Lab/A11/a11_lab.html",{"tickets":Tickets})
+                        logger.warning(f"User {request.user.username} attempted to use an invalid ticket after all tickets were sold.")
+                        return render(request, "Lab/A11/a11_lab.html", {"tickets": Tickets, "error": "Invalid ticket"})
+                else:
+                    logger.info(f"{60 - sold_tickets} tickets are left to be sold.")
+                    return render(request, "Lab/A11/a11_lab.html", {"error": f"Wait until all tickets are sold ({60 - sold_tickets} tickets left)", "tickets": Tickets})
+
+            except Exception as e:
+                return render(request, "Lab/A11/a11_lab.html", {"tickets": Tickets, "error": "Something went wrong while checking ticket availability."})
         else:
             pass
     else:
         return redirect('login')
+
 
 
 #-------------------------------------------------------------------------------------------------------------------------
@@ -746,11 +778,13 @@ def a1_broken_access_lab_1(request):
     
     name = request.POST.get('name')
     password = request.POST.get('pass')
+
     
     if name:
         logger.info(f"Login attempt - Username: {name}")
-        if name == 'admin' and login.objects.filter(user='admin', password=password).exists():
-            request.session['is_admin'] = True
+        user = authenticate(username=name, password=password)
+        login(request, user)
+        if user.username == "admin" or user.is_superuser:
             logger.info("Admin login successful.")
             return render(
                 request, 
@@ -760,7 +794,6 @@ def a1_broken_access_lab_1(request):
                     "username": "admin"
                 })
         elif name == 'jack' and password == 'jacktheripper':
-            request.session['is_admin'] = False
             logger.info("Standard user login successful: jack")
             return render(
                 request, 
@@ -776,60 +809,72 @@ def a1_broken_access_lab_1(request):
         logger.warning("Anonymous session access to lab page.")
         return render(request, 'Lab_2021/A1_BrokenAccessControl/broken_access_lab_1.html', {"no_creds": True})
 
+
 @csrf_exempt
 def a1_broken_access_lab_2(request):
-    if request.user.is_authenticated:
-        pass
-    else:
+    if not request.user.is_authenticated:
         return redirect('login')
     
     name = request.POST.get('name')
     password = request.POST.get('pass')
-    user_agent = request.META['HTTP_USER_AGENT']
+    user_agent = request.META.get('HTTP_USER_AGENT')
 
-    # print(name)
-    # print(password)
-    print(user_agent)
-    if name :  
-        if (user_agent == "pygoat_admin"):
+    if name and password:
+        user = authenticate(username=name, password=password)
+        if user:
+            login(request, user)
+            if user.username == "admin" or user.is_superuser:
+                logger.info(f"Admin access granted to: {user.username}")
+                return render(
+                    request, 
+                    'Lab_2021/A1_BrokenAccessControl/broken_access_lab_2.html', 
+                    {
+                        "data": "0NLY_F0R_4DM1N5",
+                        "username": "admin",
+                        "status": "admin"
+                    })
+        elif name == 'jack' and password == 'jacktheripper':
+            logger.info("Standard user login successful: jack")
             return render(
                 request, 
                 'Lab_2021/A1_BrokenAccessControl/broken_access_lab_2.html', 
                 {
-                    "data":"0NLY_F0R_4DM1N5",
-                    "username": "admin",
-                    "status": "admin"
+                    "not_admin": "No Secret key for this User",
+                    "username": name,
+                    "status": "not admin"
                 })
-        elif ( name=='jack' and password=='jacktheripper'):
-            html = render(
-            request, 
-            'Lab_2021/A1_BrokenAccessControl/broken_access_lab_2.html', 
-            {
-                "not_admin":"No Secret key for this User",
-                "username": name,
-                "status": "not admin"
-            })
-            return html
         else:
+            logger.warning(f"Login failed - Invalid credentials for: {name}")
             return render(request, 'Lab_2021/A1_BrokenAccessControl/broken_access_lab_2.html', {"data": "User Not Found"})
-
     else:
-        return render(request,'Lab_2021/A1_BrokenAccessControl/broken_access_lab_2.html',{"no_creds":True})
+        logger.warning("Anonymous session access to lab page.")
+        return render(request, 'Lab_2021/A1_BrokenAccessControl/broken_access_lab_2.html', {"no_creds": True})
 
 def a1_broken_access_lab_3(request):
     if not request.user.is_authenticated:
         return redirect('login')
-    if request.method == 'GET':
-        return render(request, 'Lab_2021/A1_BrokenAccessControl/broken_access_lab_3.html', {'loggedin':False})
-    elif request.method == 'POST':
-        username = request.POST["username"]
-        password = request.POST["password"]
 
-        if username == 'John' and password == 'reaper':
+    if request.method == 'GET':
+        return render(request, 'Lab_2021/A1_BrokenAccessControl/broken_access_lab_3.html', {'loggedin': False})
+
+    elif request.method == 'POST':
+        username = request.POST.get("username")
+        password = request.POST.get("password")
+
+        user = authenticate(request, username=username, password=password)
+        if user:
+            login(request, user)
+            is_admin = (user.username == 'admin')
+            logger.info(f"User '{user.username}' logged in. Admin: {is_admin}")
+            return render(request, 'Lab_2021/A1_BrokenAccessControl/broken_access_lab_3.html', {
+                'loggedin': True,
+                'admin': is_admin
+            })
+        elif username == 'John' and password == 'reaper':
             return render(request,'Lab_2021/A1_BrokenAccessControl/broken_access_lab_3.html', {'loggedin':True, 'admin': False})
-        elif username == 'admin' and password == 'admin_pass':
-            return render(request,'Lab_2021/A1_BrokenAccessControl/broken_access_lab_3.html', {'loggedin':True, 'admin': True})
-        return render(request, 'Lab_2021/A1_BrokenAccessControl/broken_access_lab_3.html', {'loggedin':False})
+
+        logger.warning(f"Failed login attempt for username: {username}")
+        return render(request, 'Lab_2021/A1_BrokenAccessControl/broken_access_lab_3.html', {'loggedin': False})
 
 def a1_broken_access_lab3_secret(request):
     if not request.user.is_authenticated:
@@ -848,18 +893,29 @@ def injection(request):
     return render(request,"Lab_2021/A3_Injection/injection.html")
 
 
+import logging
+from django.db import connection
+from django.shortcuts import render, redirect
+from django.views.decorators.csrf import csrf_exempt
+
+# Set up the logger
+logger = logging.getLogger(__name__)
+
 @csrf_exempt
 def injection_sql_lab(request):
     if request.user.is_authenticated:
+        name = request.POST.get('name')
+        password = request.POST.get('pass')
 
-        name=request.POST.get('name')
-        password=request.POST.get('pass')
-        print(name)
-        print(password)
+        logger.info(f"Received login attempt for username: {name}.")
 
         if name:
-            sql_query = "SELECT * FROM introduction_sql_lab_table WHERE id='"+name+"'AND password='"+password+"'"
+            sql_query = """
+                SELECT * FROM introduction_sql_lab_table 
+                WHERE id = %s AND password = %s
+            """
 
+            # Simulating database entries (You can keep this part for testing or database initialization)
             sql_instance = sql_lab_table(id="admin", password="65079b006e85a7e798abecb99e47c154")
             sql_instance.save()
             sql_instance = sql_lab_table(id="jack", password="jack")
@@ -869,36 +925,45 @@ def injection_sql_lab(request):
             sql_instance = sql_lab_table(id="bloke", password="f8d1ce191319ea8f4d1d26e65e130dd5")
             sql_instance.save()
 
-            print(sql_query)
+            logger.debug(f"SQL Query: {sql_query}") 
 
             try:
-                user = sql_lab_table.objects.raw(sql_query)
-                user = user[0].id
-                print(user)
+                # Use parameterized queries with Django's connection
+                with connection.cursor() as cursor:
+                    cursor.execute(sql_query, [name, password])
+                    user = cursor.fetchone()
+                    
+                    if user:
+                        user_id = user[0]  # Assuming the first column is 'id'
+                        logger.info(f"User found with id: {user_id}")
+                    else:
+                        logger.warning(f"No user found for username: {name}")
 
-            except:
+            except Exception as e:
+                logger.error(f"Error executing query: {e}")
                 return render(
-                    request, 
+                    request,
                     'Lab_2021/A3_Injection/sql_lab.html',
                     {
-                        "wrongpass":password,
-                        "sql_error":sql_query
+                        "wrongpass": password,
+                        "sql_error": sql_query
                     })
 
             if user:
-                return render(request, 'Lab_2021/A3_Injection/sql_lab.html',{"user1":user})
+                return render(request, 'Lab_2021/A3_Injection/sql_lab.html', {"user1": user_id})
             else:
                 return render(
                     request, 
                     'Lab_2021/A3_Injection/sql_lab.html',
                     {
-                        "wrongpass":password,
-                        "sql_error":sql_query
+                        "wrongpass": password,
+                        "sql_error": sql_query
                     })
         else:
             return render(request, 'Lab_2021/A3_Injection/sql_lab.html')
     else:
         return redirect('login')
+
 
 
 ##----------------------------------------------------------------------------------------------------------
@@ -971,31 +1036,46 @@ def ssti(request):
 
 def ssti_lab(request):
     if request.user.is_authenticated:
-        if request.method=="GET":
+        if request.method == "GET":
             users_blogs = Blogs.objects.filter(author=request.user)
-            return render(request,"Lab_2021/A3_Injection/ssti_lab.html", {"blogs":users_blogs})
-        elif request.method=="POST":
+            return render(request, "Lab_2021/A3_Injection/ssti_lab.html", {"blogs": users_blogs})
+
+        elif request.method == "POST":
             blog = request.POST["blog"]
             id = str(uuid.uuid4()).split('-')[-1]
 
-            blog = filter_blog(blog)
-            prepend_code = "{% extends 'introduction/base.html' %}\
-                {% block content %}{% block title %}\
-                <title>SSTI-Blogs</title>\
-                {% endblock %}"
-            
+            # Sanitize the blog content to avoid template injection
+            blog = re.sub(r'{%.*?%}|{{.*?}}', '', blog)
+            print(blog)
+
+            prepend_code = "{% extends 'introduction/base.html' %}" \
+                           "{% block content %}{% block title %}" \
+                           "<title>SSTI-Blogs</title>" \
+                           "{% endblock %}"
+
             blog = prepend_code + blog + "{% endblock %}"
-            new_blog = Blogs.objects.create(author = request.user, blog_id = id)
-            new_blog.save() 
+
+            # Log the creation of a new blog
+            logger.info(f"User {request.user.username} created a new blog with ID: {id}")
+
+            # Create and save the new blog to the database
+            new_blog = Blogs.objects.create(author=request.user, blog_id=id)
+            new_blog.save()
+
+            # Write the sanitized blog content to a new HTML file
             dirname = os.path.dirname(__file__)
             filename = os.path.join(dirname, f"templates/Lab_2021/A3_Injection/Blogs/{id}.html")
-            file = open(filename, "w+") 
-            file.write(blog)
-            file.close()
+            try:
+                with open(filename, "w+") as file:
+                    file.write(blog)
+                logger.info(f"Blog file saved successfully: {filename}")
+            except Exception as e:
+                logger.error(f"Error saving blog file: {e}")
+                return render(request, 'Lab_2021/A3_Injection/ssti_lab.html', {"error": "Failed to save blog."})
+
             return redirect(f'blog/{id}')
     else:
         return redirect('login')
-
 
 def ssti_view_blog(request,blog_id):
     if request.user.is_authenticated:
@@ -1013,72 +1093,123 @@ def crypto_failure(request):
         redirect('login')
 
 def crypto_failure_lab(request):
-    if request.user.is_authenticated:
-        if request.method=="GET":
-            return render(request,"Lab_2021/A2_Crypto_failur/crypto_failure_lab.html")
-        elif request.method=="POST":
-            username = request.POST["username"]
-            password = request.POST["password"]
-            try:
-                password = md5(password.encode()).hexdigest()
-                user = CF_user.objects.get(username=username,password=password)
-                return render(request,"Lab_2021/A2_Crypto_failur/crypto_failure_lab.html",{"user":user, "success":True,"failure":False})
-            except:
-                return render(request,"Lab_2021/A2_Crypto_failur/crypto_failure_lab.html",{"success":False, "failure":True})
-    else :
+    if not request.user.is_authenticated:
         return redirect('login')
+        
+    if request.method == "GET":
+        logger.info(f"crypto_failure_lab GET by user '{request.user.username}'")
+        return render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab.html")
+    
+    username = request.POST["username"]
+    password = request.POST["password"]
+    logger.info(f"crypto_failure_lab login attempt for username: '{username}'")
+    
+    try:
+        user = CF_user.objects.get(username=username)
+    except CF_user.DoesNotExist:
+        logger.warning(f"crypto_failure_lab: user not found '{username}'")
+        return render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab.html", {
+            "success": False, "failure": True
+        })
+    
+    try:
+        if ph.verify(user.password, password):
+            logger.info(f"crypto_failure_lab: password verified for '{username}'")
+            return render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab.html", {
+                "user": user, "success": True, "failure": False
+            })
+        else:
+            logger.warning(f"crypto_failure_lab: password verification failed for '{username}'")
+    except Exception as e:
+        logger.error(f"crypto_failure_lab: error during verification for '{username}': {e}")
+    
+    return render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab.html", {
+        "success": False, "failure": True
+    })
 
 def crypto_failure_lab2(request):
     if request.user.is_authenticated:
         if request.method == "GET":
-            return render(request,"Lab_2021/A2_Crypto_failur/crypto_failure_lab2.html")
+            return render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab2.html")
+
         elif request.method == "POST":
             username = request.POST["username"]
             password = request.POST["password"]
+            logger.info(f"POST request to crypto_failure_lab2 for username: {username}")
             try:
-                password = customHash(password)
-                user = CF_user.objects.get(username=username,password2=password)
-                return render(request,"Lab_2021/A2_Crypto_failur/crypto_failure_lab2.html",{"user":user, "success":True,"failure":False})
-            except:
-                return render(request,"Lab_2021/A2_Crypto_failur/crypto_failure_lab2.html",{"success":False, "failure":True})
+                user = CF_user.objects.get(username=username)
+            except CF_user.DoesNotExist:
+                logger.warning(f"User '{username}' not found.")
+                return render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab2.html", {
+                    "success": False, "failure": True
+                })
+            try:
+                if ph.verify(user.password, password):
+                    logger.info(f"Password verified successfully for user '{username}'")
+                    return render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab2.html", {
+                        "user": user, "success": True, "failure": False
+                    })
+                else:
+                    logger.warning(f"Password verification failed for user '{username}'")
+            except Exception as e:
+                logger.error(f"Error during password verification for user '{username}': {e}")
+
+            return render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab2.html", {
+                "success": False, "failure": True
+            })
 
 # based on CWE-319
 def crypto_failure_lab3(request):
     if request.user.is_authenticated:
         if request.method == "GET":
-            try :
-                cookie = request.COOKIES["cookie"]
-                print(cookie)
-                expire = cookie.split('|')[1]
-                expire = datetime.datetime.fromisoformat(expire)
+            try:
+                # Check for the cookie and validate it
+                cookie = request.COOKIES.get("cookie")
+                if not cookie:
+                    logger.warning("No cookie found in request.")
+                    return render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html", {"success": False, "failure": False})
+
+                signer = Signer()
+                cookie_data = signer.unsign(cookie)
+
+                expire = datetime.datetime.fromisoformat(cookie_data.split('|')[1])
                 now = datetime.datetime.now()
-                if now > expire :
-                    return render(request,"Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html",{"success":False,"failure":False})
-                elif cookie.split('|')[0] == 'admin':
-                    return render(request,"Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html",{"success":True,"failure":False,"admin":True})
+
+                if now > expire:
+                    logger.warning(f"Cookie expired at {expire}. Access denied.")
+                    return render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html", {"success": False, "failure": False})
+                elif cookie_data.split('|')[0] == 'admin':
+                    logger.info("Admin access granted via cookie.")
+                    return render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html", {"success": True, "failure": False, "admin": True})
                 else:
-                    return render(request,"Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html",{"success":True,"failure":False,"admin":False})
+                    logger.info("User access granted via cookie.")
+                    return render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html", {"success": True, "failure": False, "admin": False})
             except Exception as e:
-                print(e)
-                pass
-            return render(request,"Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html")
+                logger.error(f"Error processing cookie: {e}")
+                return render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html")
+
         if request.method == "POST":
             username = request.POST["username"]
             password = request.POST["password"]
             try:
+                cookie_data = f"{username}|{expire.isoformat()}"
+                signer = Signer()
+                signed_cookie = signer.sign(cookie_data)           
                 if username == "User" and password == "P@$$w0rd":
                     expire = datetime.datetime.now() + datetime.timedelta(minutes=60)
-                    cookie = f"{username}|{expire}"
-                    response = render(request,"Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html",{"success":True, "failure":False , "admin":False})
-                    response.set_cookie("cookie", cookie)
+                    response = render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html", {"success": True, "failure": False, "admin": False})
+                    response.set_cookie("cookie", signed_cookie, secure=True, httponly=True)
                     response.status_code = 200
+                    logger.info(f"User logged in successfully, cookie set for {username}.")
                     return response
                 else:
-                    response = render(request,"Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html",{"success":False, "failure":True})
-                    response.set_cookie("cookie", None)
+                    logger.warning(f"Failed login attempt for username: {username}.")
+                    response = render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html", {"success": False, "failure": True})
+                    response.set_cookie("cookie", signed_cookie, secure=True, httponly=True)
                     return response
-            except:
-                return render(request,"Lab_2021/A2_Crypto_failur/crypto_failure_lab2.html",{"success":False, "failure":True})
+            except Exception as e:
+                logger.error(f"Error during POST request handling: {e}")
+                return render(request, "Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html", {"success": False, "failure": True})
 
 #-----------------------------------------------SECURITY MISCONFIGURATION -------------------
 from pygoat.settings import SECRET_COOKIE_KEY

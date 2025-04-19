@@ -1,131 +1,79 @@
-# PyGoat
-<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-9-orange.svg?style=flat-square)](#contributors-)
-<!-- ALL-CONTRIBUTORS-BADGE:END -->
+# Hackathon Project – EuphratesTech SRE & DevOps Hackathon 2025
+## Team: [Your Team Name]**Team Lead:** [Your Name]  **Repository:** https://github.com/Oladev-01/Hackathon-Python-Django  **Tech Stack:** Python, Django, PostgreSQL, Docker
+---
+## Overview
+This project addresses real-world security and DevOps issues through deep refactoring, hardening, and design improvements. The original codebase had several critical security flaws. Over the 12-hour hackathon, our team systematically identified and resolved 9 major issues aligned with modern DevSecOps and SRE practices.
+---
+## Deliverables
+- **Refactored Codebase:** Clean commit history and secure structure- **Deployment Files:** `Dockerfile`, `docker-compose.yml`, PostgreSQL setup- **README:** Full breakdown of issues and solutions (you’re reading it)- **4-minute Video Demo:** [Link to video demo here]- **.env Security:** Sensitive keys & configs now loaded securely
+---
+## Identified & Resolved Issues (Security & Design)
+### 1. **Cookie Tampering – Admin Privilege Escalation**- **Issue:** Client could change `admin=0` to `admin=1` to access secret routes.- **Fix:** Replaced logic with role-checking from the server-side database session.
+---
+### 2. **Hardcoded Secrets in `settings.py`**- **Issue:** Secret keys and DB credentials were visible in plaintext.- **Fix:** Moved all secrets to `.env` file and loaded using `python-decouple`.
+---
+### 3. **PostgreSQL Credentials Not Secured**- **Issue:** DB credentials hardcoded and exposed in source files.- **Fix:** Environment variables now used to secure connection config.
+---
+### 4. **User-Agent Header Injection**- **Issue:** Custom headers could manipulate server behavior.- **Fix:** Sanitized `User-Agent` input and blocked non-standard values.
+---
+### 5. **Hardcoded Admin Credentials**- **Issue:** Admin credentials were hardcoded in the login logic.- **Fix:** Auth now checks securely against hashed database records only.
+---
+### 6. **Weak Password Hashing (MD5)**- **Issue:** MD5 used for password hashing, making it vulnerable to cracking.- **Fix:** Integrated `PasswordHasher` from `passlib` for secure hashing.
+---
+### 7. **SQL Injection Attack**- **Issue:** Raw queries were executed using unescaped user input.- **Fix:** Parameterized the queries to avoid SQL injection vectors.
+---
+### 8. **Ticket Allocation Design Flaw**- **Issue:** Users could bypass the 5-ticket limit via malformed requests.- **Fix:** Added strict ticket count validation before processing requests.
+---
+### 9. **Eval Injection (Remote Code Execution)**- **Issue:** `eval()` was used to process client input, enabling RCE.- **Fix:** Replaced `eval()` with strict input checks (e.g., `.isdigit()`).
+---
+## Setup Instructions
+```bashgit clone https://github.com/Oladev-01/Hackathon-Python-Django.gitcd Hackathon-Python-Django
+# Create virtual environmentpython3 -m venv venvsource venv/bin/activate
+# Install dependenciespip install -r requirements.txt
+# Set up environment variablescp .env.example .env  # Fill in your values
+# Run the apppython manage.py migratepython manage.py runserver
 
-intentionally vuln web Application Security in django.
-our roadmap build intentionally vuln web Application in django. The Vulnerability can based on OWASP top ten
-<br>
+Compliance Checklist
 
-Table of Contents
-=================
+[x] All secrets moved to .env
 
-* [pygoat](#pygoat)
-   * [Installation](#installation)
-      * [From Sources](#from-sources)
-      * [Docker Container](#docker-container)
-      * [Installation Video](#installation-video)
-   * [Uninstallation](#uninstallation)
-   * [Solutions](/Solutions/solution.md)
-   * [For Developers](/docs/dev_guide.md)
+[x] SQL Injection fixed
 
-## Installation
+[x] No hardcoded credentials
 
-### From Sources
+[x] Secure password hashing implemented
 
-To setup the project on your local machine:
-<br>
+[x] Admin privilege access secured
 
-First, Clone the repository using GitHub website or git in Terminal
-```
-  git clone https://github.com/adeyosemanputra/pygoat.git
-  ### To Download a specific branch
-  git clone -b <branch_name> https://github.com/adeyosemanputra/pygoat.git
-```
+[x] No eval-based execution
 
-#### Method 1
+[x] Domain input sanitized
 
-1. Install all app and python requirements using installer file - `bash installer.sh`
-2. Apply the migrations `python3 manage.py migrate`.<br>
-3. Finally, run the development server `python3 manage.py runserver`.<br>
-4. The project will be available at <http://127.0.0.1:8000> 
+[x] Secure deployment pipeline prepared
 
-#### Method 2
-
-1. Install python3 requirements `pip install -r requirements.txt`.<br> 
-2. Apply the migrations `python3 manage.py migrate`.<br>
-3. Finally, run the development server `python3 manage.py runserver`.<br>
-4. The project will be available at <http://127.0.0.1:8000> 
-
-#### Method 3
-
-1. Install all app and python requirements using `setup.py` file - `pip3 install .`
-2. Apply the migrations `python3 manage.py migrate`.<br>
-3. Finally, run the development server `python3 manage.py runserver`.<br>
-4. The project will be available at <http://127.0.0.1:8000> 
-
-### Docker Container
-1. Install [Docker](https://www.docker.com)
-2. Run `docker pull pygoat/pygoat` or `docker pull pygoat/pygoat:latest`
-3. Run `docker run --rm -p 8000:8000 pygoat/pygoat:latest`
-4. Browse to <http://127.0.0.1:8000> 
-5. Remove existing image using `docker image rm pygoat/pygoat` and pull again incase of any error
-
-### From Docker-Compose 
-1. Install [Docker](https://www.docker.com)
-2. Run `docker-compose up` or `docker-compose up -d`
-
-### Build Docker Image and Run
-1. Clone the repository  &ensp; `git clone https://github.com/adeyosemanputra/pygoat.git` 
-2. Build the docker image from Dockerfile using &ensp; `docker build -f Dockerfile -t pygoat .`
-3. Run the docker image &ensp;`docker run --rm -p 8000:8000 pygoat:latest`
-4. Browse to <http://127.0.0.1:8000> or <http://0.0.0.0:8000> 
-
-### Installation video 
-
-1. From Source using `installer.sh`
- - [Installing PyGoat from Source](https://www.youtube.com/watch?v=7bYBJXG3FRQ)
-2. Without using `installer.sh`
- - [![](http://img.youtube.com/vi/rfzQiMeiwso/0.jpg)](http://www.youtube.com/watch?v=rfzQiMeiwso "Installation Pygoat")
-3. Install with Mac M1 (using Virtualenv)
- - [![](http://img.youtube.com/vi/rfzQiMeiwso/0.jpg)](https://youtu.be/a5UV7mUw580 "Install with Mac M1 - using Virtualenv")
+[x] GitHub commit history cleaned
 
 
-## Uninstallation
 
-### On Debian/Ubuntu Based Systems
-- On Debian/Ubuntu based systems, you can use the `uninstaller.sh` script to uninstall `pygoat` along with all it's dependencies.
-- To uninstall `pygoat`, simply run:
-```bash
-$ bash ./uninstaller.sh
-```
+---
 
-### On Other Systems
-- On other systems, you can use the `uninstaller.py` script to uninstall `pygoat` along with all it's dependencies
-- To uninstall `pygoat`, simply run:
-```bash
-$ python3 uninstaller.py
-```
+Known Limitations
 
-## Solutions 
-<a href="/Solutions/solution.md">Solutions to all challenges</a>
+Not yet integrated with production-grade logging/monitoring tools
 
-## Contributors ✨
+Rate-limiting and brute-force protections not implemented
 
-Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+Unit test coverage needs improvement
 
-<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-<table>
-  <tr>
-    <td align="center"><a href="https://github.com/pwned-17"><img src="https://avatars.githubusercontent.com/u/61360833?v=4?s=100" width="100px;" alt=""/><br /><sub><b>pwned-17</b></sub></a><br /><a href="https://github.com/adeyosemanputra/pygoat/commits?author=pwned-17" title="Code">💻</a></td>
-    <td align="center"><a href="https://github.com/prince-7"><img src="https://avatars.githubusercontent.com/u/53997924?v=4?s=100" width="100px;" alt=""/><br /><sub><b>Aman Singh</b></sub></a><br /><a href="https://github.com/adeyosemanputra/pygoat/commits?author=prince-7" title="Code">💻</a></td>
-    <td align="center"><a href="https://github.com/adeyosemanputra"><img src="https://avatars.githubusercontent.com/u/24958168?v=4?s=100" width="100px;" alt=""/><br /><sub><b>adeyosemanputra</b></sub></a><br /><a href="https://github.com/adeyosemanputra/pygoat/commits?author=adeyosemanputra" title="Code">💻</a> <a href="https://github.com/adeyosemanputra/pygoat/commits?author=adeyosemanputra" title="Documentation">📖</a></td>
-    <td align="center"><a href="https://github.com/gaurav618618"><img src="https://avatars.githubusercontent.com/u/29380890?v=4?s=100" width="100px;" alt=""/><br /><sub><b>gaurav618618</b></sub></a><br /><a href="https://github.com/adeyosemanputra/pygoat/commits?author=gaurav618618" title="Code">💻</a> <a href="https://github.com/adeyosemanputra/pygoat/commits?author=gaurav618618" title="Documentation">📖</a></td>
-    <td align="center"><a href="https://github.com/kUSHAL0601"><img src="https://avatars.githubusercontent.com/u/29600964?v=4?s=100" width="100px;" alt=""/><br /><sub><b>MajAK</b></sub></a><br /><a href="https://github.com/adeyosemanputra/pygoat/commits?author=kUSHAL0601" title="Code">💻</a></td>
-    <td align="center"><a href="https://github.com/JustinDPerkins"><img src="https://avatars.githubusercontent.com/u/60413733?v=4?s=100" width="100px;" alt=""/><br /><sub><b>JustinPerkins</b></sub></a><br /><a href="https://github.com/adeyosemanputra/pygoat/commits?author=JustinDPerkins" title="Code">💻</a></td>
-    <td align="center"><a href="https://github.com/Hkakashi"><img src="https://avatars.githubusercontent.com/u/43193113?v=4?s=100" width="100px;" alt=""/><br /><sub><b>Liu Peng</b></sub></a><br /><a href="https://github.com/adeyosemanputra/pygoat/commits?author=Hkakashi" title="Code">💻</a></td>
-  </tr>
-  <tr>
-    <td align="center"><a href="https://github.com/RupakBiswas-2304"><img src="https://avatars.githubusercontent.com/u/75058161?v=4?s=100" width="100px;" alt=""/><br /><sub><b>Metaphor</b></sub></a><br /><a href="https://github.com/adeyosemanputra/pygoat/commits?author=RupakBiswas-2304" title="Code">💻</a></td>
-    <td align="center"><a href="https://whokilleddb.github.io"><img src="https://avatars.githubusercontent.com/u/56482137?v=4?s=100" width="100px;" alt=""/><br /><sub><b>whokilleddb</b></sub></a><br /><a href="https://github.com/adeyosemanputra/pygoat/commits?author=whokilleddb" title="Code">💻</a></td>
-  </tr>
-</table>
 
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
 
-<!-- ALL-CONTRIBUTORS-LIST:END -->
+---
 
-This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
+Conclusion
+
+We applied a security-first refactoring approach to transform the codebase into a secure, stable, and production-ready system. The project reflects our understanding of DevOps, secure coding, CI/CD, and system reliability.
+
+Let's build a more secure digital Nigeria together.
+
+
+link to video presentation: https://drive.google.com/file/d/1J_ZyrKm7RQlt-9BSvTL0NgvN_ONk9as0
