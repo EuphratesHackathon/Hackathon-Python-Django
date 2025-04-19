@@ -92,8 +92,7 @@ Our GitHub Actions workflow includes:
 5. some security issues exists due to time constraints
 
 ## Demo Video
-
-[Link to 4-minute demo video] - Demonstrating:
+[(https://drive.google.com/drive/folders/1Zp7B8QD83hoYPUr-_HmnKwLUBU22aa31)] - Demonstrating:
 - Original vulnerabilities and fixes
 - CI/CD pipeline execution
 - Deployment process
