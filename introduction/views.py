@@ -39,6 +39,10 @@ from .models import (FAANG, AF_admin, AF_session_id, Blogs, CF_user, authLogin,
                      comments, info, login, otp, sql_lab_table, tickits)
 from .utility import customHash, filter_blog
 
+import logging
+logger = logging.getLogger(__name__)
+
+
 #*****************************************Lab Requirements****************************************************#
 
 #*****************************************Login and Registration****************************************************#
@@ -338,7 +342,8 @@ def ba_lab(request):
         name = request.POST.get('name')
         password = request.POST.get('pass')
         if name:
-            if request.COOKIES.get('admin') == "1":
+            if name == 'admin' and login.objects.filter(user='admin', password=password).exists():
+                request.session['is_admin'] = True
                 return render(
                     request, 
                     'Lab/BrokenAccess/ba_lab.html', 
@@ -346,31 +351,29 @@ def ba_lab(request):
                         "data":"0NLY_F0R_4DM1N5",
                         "username": "admin"
                     })
-            elif login.objects.filter(user='admin',password=password):
-                html = render(
+            elif login.objects.filter(user=name, password=password).exists():
+                # Regular user - no admin session set
+                request.session['is_admin'] = False
+                return render(
+                    request, 
+                    'Lab/BrokenAccess/ba_lab.html', 
+                    {
+                        "not_admin":"No Secret key for this User",
+                        "username": name
+                    })
+            else:
+                return render(request, 'Lab/BrokenAccess/ba_lab.html', {"data": "User Not Found"})
+        else:
+            # Check if the user is already logged in as admin via session
+            if request.session.get('is_admin', False):
+                return render(
                     request, 
                     'Lab/BrokenAccess/ba_lab.html', 
                     {
                         "data":"0NLY_F0R_4DM1N5",
                         "username": "admin"
                     })
-                html.set_cookie("admin", "1",max_age=200)
-                return html
-            elif login.objects.filter(user=name,password=password):
-                html = render(
-                request, 
-                'Lab/BrokenAccess/ba_lab.html', 
-                {
-                    "not_admin":"No Secret key for this User",
-                    "username": name
-                })
-                html.set_cookie("admin", "0",max_age=200)
-                return html
-            else:
-                return render(request, 'Lab/BrokenAccess/ba_lab.html', {"data": "User Not Found"})
-
-        else:
-            return render(request,'Lab/BrokenAccess/ba_lab.html',{"no_creds":True})
+            return render(request, 'Lab/BrokenAccess/ba_lab.html', {"no_creds":True})
     else:
         return redirect('login')
 
@@ -735,42 +738,43 @@ def a1_broken_access(request):
     
     return render(request,"Lab_2021/A1_BrokenAccessControl/broken_access.html")
 
-
 @csrf_exempt
 def a1_broken_access_lab_1(request):
-    if request.user.is_authenticated:
-        pass
-    else:
+    if not request.user.is_authenticated:
+        logger.warning("Unauthenticated access attempt to Broken Access Lab 1.")
         return redirect('login')
     
     name = request.POST.get('name')
     password = request.POST.get('pass')
-    print(password)
-    print(name)
+    
     if name:
-        if request.COOKIES.get('admin') == "1":
+        logger.info(f"Login attempt - Username: {name}")
+        if name == 'admin' and login.objects.filter(user='admin', password=password).exists():
+            request.session['is_admin'] = True
+            logger.info("Admin login successful.")
             return render(
                 request, 
                 'Lab_2021/A1_BrokenAccessControl/broken_access_lab_1.html', 
                 {
-                    "data":"0NLY_F0R_4DM1N5",
+                    "data": "0NLY_F0R_4DM1N5",
                     "username": "admin"
                 })
-        elif (name=='jack' and password=='jacktheripper'): # Will implement hashing here
-            html = render(
-            request, 
-            'Lab_2021/A1_BrokenAccessControl/broken_access_lab_1.html', 
-            {
-                "not_admin":"No Secret key for this User",
-                "username": name
-            })
-            html.set_cookie("admin", "0",max_age=200)
-            return html
+        elif name == 'jack' and password == 'jacktheripper':
+            request.session['is_admin'] = False
+            logger.info("Standard user login successful: jack")
+            return render(
+                request, 
+                'Lab_2021/A1_BrokenAccessControl/broken_access_lab_1.html', 
+                {
+                    "not_admin": "No Secret key for this User",
+                    "username": name
+                })
         else:
+            logger.warning(f"Login failed - Invalid credentials for: {name}")
             return render(request, 'Lab_2021/A1_BrokenAccessControl/broken_access_lab_1.html', {"data": "User Not Found"})
-
     else:
-        return render(request,'Lab_2021/A1_BrokenAccessControl/broken_access_lab_1.html',{"no_creds":True})
+        logger.warning("Anonymous session access to lab page.")
+        return render(request, 'Lab_2021/A1_BrokenAccessControl/broken_access_lab_1.html', {"no_creds": True})
 
 @csrf_exempt
 def a1_broken_access_lab_2(request):
@@ -796,7 +800,7 @@ def a1_broken_access_lab_2(request):
                     "username": "admin",
                     "status": "admin"
                 })
-        elif ( name=='jack' and password=='jacktheripper'): # Will implement hashing here
+        elif ( name=='jack' and password=='jacktheripper'):
             html = render(
             request, 
             'Lab_2021/A1_BrokenAccessControl/broken_access_lab_2.html', 
